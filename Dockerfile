@@ -39,28 +39,31 @@ RUN set -e && \
     fi && \
     rm -rf /var/cache/apk/* /tmp/old_php_modules.txt /tmp/target_pkgs.txt
 
-# 3. 徹底清理舊版 PHP 7.4、OpenSSL 1.0.2u 與舊版 curl 殘留，統一所有 PHP/FPM 路徑指向唯一目標版本
+# 3. 徹底清理舊版殘留，並建立軟連結對接目標版本（確保 /etc/php84/conf.d 存在供 entrypoint.sh 寫入）
 RUN PHP_PKG_PREFIX="php$(echo ${PHP_VER} | tr -d '.')" && \
     PHP_NUM=$(echo ${PHP_VER} | tr -d '.') && \
     rm -rf /opt/php/* /opt/openssl-1.0.2u /opt/curl && \
-    mkdir -p /opt/php/bin /opt/php/sbin /opt/openssl-1.0.2u/bin /opt/curl/bin && \
+    mkdir -p /opt/php/bin /opt/php/sbin /opt/openssl-1.0.2u/bin /opt/curl/bin /etc/php${PHP_NUM}/conf.d && \
     ln -sf /usr/bin/${PHP_PKG_PREFIX} /opt/php/bin/php && \
     ln -sf /usr/bin/${PHP_PKG_PREFIX} /usr/bin/php && \
+    ln -sf /usr/bin/${PHP_PKG_PREFIX} /usr/bin/php84 && \
     ln -sf /usr/bin/openssl /opt/openssl-1.0.2u/bin/openssl && \
     ln -sf /usr/bin/curl /opt/curl/bin/curl && \
     if [ -f /usr/sbin/php-fpm${PHP_NUM} ]; then \
         ln -sf /usr/sbin/php-fpm${PHP_NUM} /opt/php/sbin/php-fpm && \
         ln -sf /usr/sbin/php-fpm${PHP_NUM} /usr/sbin/php-fpm84; \
+    fi && \
+    if [ "${PHP_NUM}" != "84" ]; then \
+        ln -sf /etc/php${PHP_NUM} /etc/php84; \
     fi
 
-# 4. 更新面板前端與後端腳本：只保留單一版本顯示，移除第二個選項（無切換）
+# 4. 更新面板：保留預設 php84 啟動 ID 避免狀態衝突，僅顯示唯一目標版本（無切換）
 RUN NEW_FULL=$(/opt/php/bin/php -r 'echo PHP_VERSION;') && \
     NEW_SSL=$(/opt/php/bin/php -r 'echo OPENSSL_VERSION_TEXT;') && \
-    sed -i "s|PHP 7\.4|PHP ${PHP_VER}|g" /opt/hidden-ui/index.html && \
+    sed -i "s|PHP 8\.4|PHP ${PHP_VER}|g" /opt/hidden-ui/index.html && \
     sed -i -E \
-      -e "s|\"versions\":\[.*\]|\"versions\":[{\"id\":\"php74\",\"php\":\"${NEW_FULL}\",\"openssl\":\"${NEW_SSL}\",\"available\":true}]|g" \
-      -e "s|php-runtime-daemon php84|php-runtime-daemon php74|g" \
+      -e "s|\"versions\":\[.*\]|\"versions\":[{\"id\":\"php84\",\"php\":\"${NEW_FULL}\",\"openssl\":\"${NEW_SSL}\",\"available\":true}]|g" \
       /usr/local/bin/php-runtime-daemon
 
-# 5. 驗證最終唯一 PHP 版本與面板 JSON 輸出
-RUN php -v && grep -n "versions" /usr/local/bin/php-runtime-daemon
+# 5. 驗證配置目錄軟連結與唯一 PHP 版本
+RUN ls -ld /etc/php84 /etc/php84/conf.d && php -v && grep -n "versions" /usr/local/bin/php-runtime-daemon
