@@ -4,21 +4,20 @@ ARG PHP_VER=8.3
 
 USER root
 
-# 1. 先提取原 PHP 7.4 的模組清單並儲存到暫存檔（避免多行變數解析出錯）
+# 1. 提取原 PHP 7.4 的模組清單並儲存到暫存檔
 RUN /opt/php/bin/php -m \
 
     | grep -vE '^\[|^(Core|date|filter|hash|json|libxml|openssl|pcre|Reflection|SPL|standard|zlib|mysqlnd|Zend OPcache)$' \
     | tr -d '\r' \
     | tr '[:upper:]' '[:lower:]' \
-    | sort -u > /tmp/old_php_modules.txt && \
-    cat /tmp/old_php_modules.txt
+    | sort -u > /tmp/old_php_modules.txt
 
-# 2. 更新軟體源，升級現有的 php84 與底層 OpenSSL 庫，並精準安裝目標 PHP 版本
+# 2. 更新軟體源，升級現有的 php84、curl 與底層 OpenSSL 庫，並精準安裝目標 PHP 版本
 RUN set -e && \
     PHP_PKG_PREFIX="php$(echo ${PHP_VER} | tr -d '.')" && \
     apk update && \
-    for pkg in $(apk info | grep -E '^php84|^libssl|^libcrypto'); do \
-        apk add --no-cache --upgrade "$pkg" || echo "跳過無需升級的套件: $pkg"; \
+    for pkg in $(apk info | grep -E '^php84|^libssl|^libcrypto|^curl'); do \
+        apk add --no-cache --upgrade "$pkg" || echo "跳過: $pkg"; \
     done && \
     if [ "${PHP_PKG_PREFIX}" != "php84" ]; then \
         echo "${PHP_PKG_PREFIX}" > /tmp/target_pkgs.txt && \
@@ -40,28 +39,21 @@ RUN set -e && \
     fi && \
     rm -rf /var/cache/apk/* /tmp/old_php_modules.txt /tmp/target_pkgs.txt
 
-# 3. 清理舊版 PHP 7.4 二進位殘留，並建立軟連結將 /opt/php 指向新指定的 PHP 版本
+# 3. 徹底清理舊版 PHP 7.4、OpenSSL 1.0.2u 與舊版 curl 殘留，建立軟連結對接新版本
 RUN PHP_PKG_PREFIX="php$(echo ${PHP_VER} | tr -d '.')" && \
-    rm -rf /opt/php/* && \
-    mkdir -p /opt/php/bin /opt/php/sbin && \
+    rm -rf /opt/php/* /opt/openssl-1.0.2u /opt/curl && \
+    mkdir -p /opt/php/bin /opt/php/sbin /opt/openssl-1.0.2u/bin /opt/curl/bin && \
     ln -sf /usr/bin/${PHP_PKG_PREFIX} /opt/php/bin/php && \
     ln -sf /usr/bin/${PHP_PKG_PREFIX} /usr/bin/php && \
+    ln -sf /usr/bin/openssl /opt/openssl-1.0.2u/bin/openssl && \
+    ln -sf /usr/bin/curl /opt/curl/bin/curl && \
     if [ -f /usr/sbin/php-fpm$(echo ${PHP_VER} | tr -d '.') ]; then \
         ln -sf /usr/sbin/php-fpm$(echo ${PHP_VER} | tr -d '.') /opt/php/sbin/php-fpm; \
     fi
 
-# 4. 動態抓取兩個新版本的真實版號與 OpenSSL 資訊，精準更新面板前端 index.html 顯示文字
-RUN NEW_CUSTOM_FULL=$(/opt/php/bin/php -r 'echo PHP_VERSION;') && \
-    NEW_CUSTOM_SSL=$(/opt/php/bin/php -r 'echo OPENSSL_VERSION_TEXT;') && \
-    NEW_84_FULL=$(/usr/bin/php84 -r 'echo PHP_VERSION;') && \
-    NEW_84_SSL=$(/usr/bin/php84 -r 'echo OPENSSL_VERSION_TEXT;') && \
-    echo "槽位1新顯示: PHP ${PHP_VER} (${NEW_CUSTOM_FULL}) / ${NEW_CUSTOM_SSL}" && \
-    echo "槽位2新顯示: PHP 8.4 (${NEW_84_FULL}) / ${NEW_84_SSL}" && \
-    sed -i \
-      -e "s|PHP 7\.4 (7\.4\.33) / OpenSSL 1\.0\.2u 20 Dec 2019|PHP ${PHP_VER} (${NEW_CUSTOM_FULL}) / ${NEW_CUSTOM_SSL}|g" \
-      -e "s|PHP 8\.4 (8\.4\.21) / OpenSSL 3\.5\.6 7 Apr 2026|PHP 8.4 (${NEW_84_FULL}) / ${NEW_84_SSL}|g" \
-      -e "s|PHP 7\.4|PHP ${PHP_VER}|g" \
-      /opt/hidden-ui/index.html
+# 4. 精準更新面板前端 index.html 中的 PHP 標題名稱（保留內部 'php74' 切換代號）
+RUN sed -i "s|PHP 7\.4|PHP ${PHP_VER}|g" /opt/hidden-ui/index.html
 
-# 5. 驗證最終替換後的頁面文字
-RUN grep -aoE '.{0,10}PHP .{0,55}' /opt/hidden-ui/index.html || true
+# 5. 驗證最終兩個 PHP 槽位的版本與 OpenSSL 資訊
+RUN /opt/php/bin/php -r 'echo "槽位1: PHP " . PHP_VERSION . " / " . OPENSSL_VERSION_TEXT . "\n";' && \
+    /usr/bin/php84 -r 'echo "槽位2: PHP " . PHP_VERSION . " / " . OPENSSL_VERSION_TEXT . "\n";'
