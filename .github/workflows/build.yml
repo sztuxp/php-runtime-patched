@@ -1,10 +1,10 @@
-name: Build & Push Multi-Arch PHP Runtime to Docker Hub
+name: Build & Push Single-PHP Multi-Arch Runtime (Dev)
 
 on:
   workflow_dispatch:
     inputs:
       php_version:
-        description: '選擇目標 PHP 版本號'
+        description: '選擇目標單一 PHP 版本號'
         required: true
         default: '8.3'
         type: choice
@@ -13,9 +13,9 @@ on:
           - '8.3'
           - '8.4'
       image_tag:
-        description: '自訂 Docker Hub 鏡像標籤 (預設為 latest)'
+        description: '自訂 Docker Hub 鏡像標籤 (預設為 dev，避免覆蓋 main 的 latest)'
         required: true
-        default: 'latest'
+        default: 'dev'
         type: string
 
 env:
