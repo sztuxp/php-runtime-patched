@@ -1,18 +1,17 @@
 FROM livecodesvip/php-runtime:latest
 
-# 接收外部傳入的目標 PHP 版本號（用來替換原本的 7.4 槽位），預設為 8.3
 ARG PHP_VER=8.3
 
 USER root
 
-# 1. 升級原系統的 PHP 8.4 至最新版本，並安裝你指定的目標 PHP 版本（維持原插件）
+# 1. 提取原 7.4 插件清單 -> 升級原生 PHP 8.4 與 OpenSSL -> 安裝目標 PHP 版本
 RUN PHP_PKG_PREFIX="php$(echo ${PHP_VER} | tr -d '.')" && \
     apk update && \
-    # 1a. 先提取原本 7.4 的模組清單（必須在刪除 7.4 前提取） \
     OLD_MODULES=$(/opt/php/bin/php -m | grep -vE '^\[|^(Core|date|filter|hash|json|libxml|openssl|pcre|Reflection|SPL|standard|zlib|mysqlnd|Zend OPcache)$' | tr '[:upper:]' '[:lower:]') && \
-    # 1b. 升級系統原生的 PHP 8.4 及其所有已安裝擴充套件至最新安全版本，並升級底層 OpenSSL 庫 \
-    apk upgrade --no-cache $(apk info | grep -E '^php84|^libssl|^libcrypto') && \
-    # 1c. 若指定的目標版本不是 8.4，則精準安裝對應版本的 PHP 與原模組 \
+    UPGRADE_PKGS=$(apk info | grep -E '^php84|^libssl|^libcrypto' | tr '\n' ' ') && \
+    if [ -n "$UPGRADE_PKGS" ]; then \
+        apk add --no-cache --upgrade $UPGRADE_PKGS; \
+    fi && \
     if [ "${PHP_PKG_PREFIX}" != "php84" ]; then \
         PKGS="${PHP_PKG_PREFIX} ${PHP_PKG_PREFIX}-cli ${PHP_PKG_PREFIX}-fpm ${PHP_PKG_PREFIX}-phar ${PHP_PKG_PREFIX}-openssl ${PHP_PKG_PREFIX}-json ${PHP_PKG_PREFIX}-opcache" && \
         for mod in $OLD_MODULES; do \
@@ -49,5 +48,5 @@ RUN NEW_CUSTOM_FULL=$(/opt/php/bin/php -r 'echo PHP_VERSION;') && \
       -e "s|PHP 7\.4|PHP ${PHP_VER}|g" \
       /opt/hidden-ui/index.html
 
-# 4. 驗證最終替換後的頁面文字與兩個 PHP 版本狀態
+# 4. 驗證最終替換後的頁面文字
 RUN grep -aoE '.{0,10}PHP .{0,55}' /opt/hidden-ui/index.html || true
